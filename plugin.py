@@ -403,30 +403,29 @@ class BasePlugin:
             # heater was on max but setpoint was not reached... no learning
             Domoticz.Debug("Last power was 100% but setpoint not reached... no callibration")
             pass
-        elif self.intemp > self.Internals['LastInT'] and self.Internals['LastSetPoint'] > self.Internals['LastInT']:
-            # learning ConstC
-            ConstC = (self.Internals['ConstC'] * ((self.Internals['LastSetPoint'] - self.Internals['LastInT']) /
-                                                  (self.intemp - self.Internals['LastInT']) *
-                                                  (timedelta.total_seconds(now - self.lastcalc) /
-                                                   (self.calculate_period * 60))))
-            self.WriteLog("New calc for ConstC = {}".format(ConstC), "Verbose")
-            self.Internals['ConstC'] = round((self.Internals['ConstC'] * self.Internals['nbCC'] + ConstC) /
-                                             (self.Internals['nbCC'] + 1), 3) #  (Xtremernl) Round aangepast van 2 naar 3
-            self.Internals['nbCC'] = min(self.Internals['nbCC'] + 1, 25) #  (Xtremernl) Maximale nbCC aangepast van 50 naar 25
-            self.WriteLog("ConstC updated to {}".format(self.Internals['ConstC']), "Verbose")
-        elif (self.outtemp is not None and self.Internals['LastOutT'] is not None) and \
-                 self.Internals['LastSetPoint'] > self.Internals['LastOutT']:
-            # learning ConstT
-            ConstT = (self.Internals['ConstT'] + ((self.Internals['LastSetPoint'] - self.intemp) /
-                                                  (self.Internals['LastSetPoint'] - self.Internals['LastOutT']) *
-                                                  self.Internals['ConstC'] *
-                                                  (timedelta.total_seconds(now - self.lastcalc) /
-                                                   (self.calculate_period * 60))))
-            self.WriteLog("New calc for ConstT = {}".format(ConstT), "Verbose")
-            self.Internals['ConstT'] = round((self.Internals['ConstT'] * self.Internals['nbCT'] + ConstT) /
-                                             (self.Internals['nbCT'] + 1), 3) #  (Xtremernl) Round aangepast van 2 naar 3
-            self.Internals['nbCT'] = min(self.Internals['nbCT'] + 1, 25) #  (Xtremernl) Maximale nbCC aangepast van 50 naar 25
-            self.WriteLog("ConstT updated to {}".format(self.Internals['ConstT']), "Verbose")
+        else:
+            if (self.outtemp is not None and self.Internals['LastOutT'] is not None) and \
+                     self.Internals['LastSetPoint'] > self.Internals['LastOutT']:
+                self.WriteLog("Temperatures: Last Inside = {} / Last Outside = {} and Last Power = {}".format(self.Internals['LastInT'], self.Internals['LastOutT'], self.Internals['LastPwr']), "Verbose")
+                # learning ConstT
+                ConstT = ((self.Internals['LastPwr'] - (self.intemp - self.Internals['LastInT']) * self.Internals['ConstC']) /
+                                                        (self.intemp - self.Internals['LastOutT']))
+                self.WriteLog("New calc for ConstT = {}".format(ConstT), "Verbose")
+                self.Internals['ConstT'] = round((self.Internals['ConstT'] * self.Internals['nbCT'] + ConstT) /
+                                                 (self.Internals['nbCT'] + 1), 3) #  (Xtremernl) Round changed from 2 to 3 digits	
+                self.Internals['nbCT'] = min(self.Internals['nbCT'] + 1, 25) #  (Xtremernl) Max calculations nbCT from 50 to 25
+                self.WriteLog("ConstT updated to {}".format(self.Internals['ConstT']), "Verbose")
+            if self.intemp > self.Internals['LastInT'] and self.Internals['LastSetPoint'] > self.Internals['LastInT']: #when the reached intemp > started intemp AND the setpoint was higher than intemp at start of the heating cycle
+                # learning ConstC
+                ConstC = (self.Internals['ConstC'] * ((self.Internals['LastSetPoint'] - self.Internals['LastInT']) /
+                                                      (self.intemp - self.Internals['LastInT']) *
+                                                      (timedelta.total_seconds(now - self.lastcalc) /
+                                                       (self.calculate_period * 60))))
+                self.WriteLog("New calc for ConstC = {}".format(ConstC), "Verbose")
+                self.Internals['ConstC'] = round((self.Internals['ConstC'] * self.Internals['nbCC'] + ConstC) /
+                                                 (self.Internals['nbCC'] + 1), 3) #  (Xtremernl) Round changed from 2 to 3 digits
+                self.Internals['nbCC'] = min(self.Internals['nbCC'] + 1, 25) #  (Xtremernl) Max calculations nbCC from 50 to 25
+                self.WriteLog("ConstC updated to {}".format(self.Internals['ConstC']), "Verbose")
 
 
     def switchHeat(self, switch):
