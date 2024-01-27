@@ -4,10 +4,10 @@ Author: Logread,
         adapted from the Vera plugin by Antor, see:
             http://www.antor.fr/apps/smart-virtual-thermostat-eng-2/?lang=en
             https://github.com/AntorFr/SmartVT
-Version: 0.4.14 (November 13, 2023) - see history.txt for versions history
+Version: 0.4.10 (November 25, 2020) - see history.txt for versions history
 """
 """
-<plugin key="SVT" name="Smart Virtual Thermostat" author="logread" version="0.4.12" wikilink="https://www.domoticz.com/wiki/Plugins/Smart_Virtual_Thermostat.html" externallink="https://github.com/999LV/SmartVirtualThermostat.git">
+<plugin key="SVT" name="Smart Virtual Thermostat" author="logread" version="0.4.11" wikilink="https://www.domoticz.com/wiki/Plugins/Smart_Virtual_Thermostat.html" externallink="https://github.com/999LV/SmartVirtualThermostat.git">
     <description>
         <h2>Smart Virtual Thermostat</h2><br/>
         Easily implement in Domoticz an advanced virtual thermostat based on time modulation<br/>
@@ -27,11 +27,11 @@ Version: 0.4.14 (November 13, 2023) - see history.txt for versions history
         <param field="Mode3" label="Heating Switches (csv list of idx)" width="100px" required="true" default="0"/>
         <param field="Mode4" label="Apply minimum heating per cycle" width="200px">
             <options>
-		<option label="only when heating required" value="Normal"  default="true" />
+				<option label="only when heating required" value="Normal"  default="true" />
                 <option label="always" value="Forced"/>
             </options>
         </param> 
-        <param field="Mode5" label="Calc. cycle, Min. Heating time /cycle, Pause On delay, Pause Off delay, Forced mode duration (all in minutes), Delta max (°C)" width="200px" required="true" default="30,0,2,1,60,0.2"/>
+        <param field="Mode5" label="Calc. cycle, Min. Heating time in % of the cycle time, Pause On delay, Pause Off delay, Forced mode duration (all in minutes), Delta max (°C)" width="200px" required="true" default="30,0,2,1,60,0.2"/>
         <param field="Mode6" label="Logging Level" width="200px">
             <options>
                 <option label="Normal" value="Normal"  default="true"/>
@@ -54,7 +54,7 @@ from datetime import datetime, timedelta
 import time
 import base64
 import itertools
-
+from distutils.version import LooseVersion
 
 class deviceparam:
 
@@ -95,8 +95,6 @@ class BasePlugin:
         self.pauserequested = False
         self.pauserequestchangedtime = datetime.now()
         self.forced = False
-        self.boost = True  # boost heating when boostgap is reached
-        self.boostgap = 0.5  # gap in °C between inside temp and setpoint above which turbo mode is active
         self.intemp = 20.0
         self.outtemp = 20.0
         self.setpoint = 20.0
@@ -107,13 +105,12 @@ class BasePlugin:
         self.nexttemps = self.endheat
         self.learn = True
         self.loglevel = None
+        self.statussupported = True
         self.intemperror = False
-        self.versionsupported = False
         return
 
 
     def onStart(self):
-
         # setup the appropriate logging level
         try:
             debuglevel = int(Parameters["Mode6"])
@@ -129,14 +126,11 @@ class BasePlugin:
             self.debug = False
             Domoticz.Debugging(0)
 
-        # check if the host domoticz version can run the plugin
-        versionstr = Parameters["DomoticzVersion"]
-        version = float(versionstr.split(" ")[0])
-        if version >= 2023.2:
-            self.versionsupported = True
-        else:
-            Domoticz.Error("Minimum domoticz version is 2023.2")
-            return
+        # check if the host domoticz version supports the Domoticz.Status() python framework function
+        try:
+            Domoticz.Status("This version of domoticz allows status logging by the plugin (in verbose mode)")
+        except Exception:
+            self.statussupported = False
 
         # create the child devices if these do not exist yet
         devicecreated = []
@@ -164,10 +158,13 @@ class BasePlugin:
             devicecreated.append(deviceparam(4, 0, "20"))  # default is 20 degrees
         if 5 not in Devices:
             Domoticz.Device(Name="Setpoint Economy", Unit=5, Type=242, Subtype=1, Used=1).Create()
-            devicecreated.append(deviceparam(5 ,0, "20"))  # default is 20 degrees
+            devicecreated.append(deviceparam(5 ,0, "17"))  # default is 17 degrees
         if 6 not in Devices:
             Domoticz.Device(Name="Thermostat temp", Unit=6, TypeName="Temperature").Create()
             devicecreated.append(deviceparam(6, 0, "20"))  # default is 20 degrees
+        if 7 not in Devices:
+            Domoticz.Device(Name="Power", Unit=7, Type=243, Subtype=6, Used=0, Description="Power percentage calculated this period").Create()
+            devicecreated.append(deviceparam(7, 0, "0"))  # default is 0 percent
 
         # if any device has been created in onStart(), now is time to update its defaults
         for device in devicecreated:
@@ -220,16 +217,12 @@ class BasePlugin:
 
 
     def onStop(self):
-
         Domoticz.Debugging(0)
 
 
     def onCommand(self, Unit, Command, Level, Color):
 
         Domoticz.Debug("onCommand called for Unit {}: Command '{}', Level: {}".format(Unit, Command, Level))
-        # if host domoticz version is not OK than do nothing
-        if not self.versionsupported:
-            return
 
         if Unit == 3:  # pause switch
             self.pauserequestchangedtime = datetime.now()
@@ -254,14 +247,10 @@ class BasePlugin:
 
     def onHeartbeat(self):
 
-        # if host domoticz version is not OK than do nothing
-        if not self.versionsupported:
-            return
-
         now = datetime.now()
-
+        
         # fool proof checking.... based on users feedback
-        if not all(device in Devices for device in (1,2,3,4,5,6)):
+        if not all(device in Devices for device in (1,2,3,4,5,6,7)):
             Domoticz.Error("one or more devices required by the plugin is/are missing, please check domoticz device creation settings and restart !")
             return
 
@@ -307,7 +296,6 @@ class BasePlugin:
                 if self.pauserequestchangedtime + timedelta(minutes=self.pauseoffdelay) <= now:
                     self.WriteLog("Pause is now Off", "Status")
                     self.pause = False
-                    self.nextcalc = now  # this will force a recalculation on the next heartbeat
 
             elif not self.pause and self.pauserequested:  # we are not in pause and the pause switch is now on
                 if self.pauserequestchangedtime + timedelta(minutes=self.pauseondelay) <= now:
@@ -360,10 +348,10 @@ class BasePlugin:
             else:
                 self.learn = True
             if self.outtemp is None:
-                power = round((self.setpoint - self.intemp) * self.Internals["ConstC"], 1)
+                power = round((self.setpoint - self.intemp) * self.Internals["ConstC"], 3) # CJac Round aangepast van 2 naar 3
             else:
                 power = round((self.setpoint - self.intemp) * self.Internals["ConstC"] +
-                              (self.setpoint - self.outtemp) * self.Internals["ConstT"], 1)
+                              (self.setpoint - self.outtemp) * self.Internals["ConstT"], 3) # CJac Round aangepast van 2 naar 3
 
         if power < 0:
             power = 0  # lower limit
@@ -376,12 +364,7 @@ class BasePlugin:
                 "Calculated power is {}, applying minimum power of {}".format(power, self.minheatpower), "Verbose")
             power = self.minheatpower
 
-        # apply full power if boostt mode and intemp is more than 1°C below setpoint
-        if self.boost and (self.setpoint - self.intemp) > self.boostgap:
-            self.WriteLog(
-                "Applying boost mode since current temperature is more than {}°C lower than setpoint".format(self.boostgap), "Verbose")
-            power = 100
-
+        Devices[7].Update(nValue=Devices[7].nValue, sValue=str(power), TimedOut=False)
         heatduration = round(power * self.calculate_period / 100)
         self.WriteLog("Calculation: Power = {} -> heat duration = {} minutes".format(power, heatduration), "Verbose")
 
@@ -392,12 +375,11 @@ class BasePlugin:
             self.endheat = datetime.now() + timedelta(minutes=heatduration)
             Domoticz.Debug("End Heat time = " + str(self.endheat))
             self.switchHeat(True)
-            #if self.Internals["ALStatus"] < 2:
-            self.Internals['LastPwr'] = power
-            self.Internals['LastInT'] = self.intemp
-            self.Internals['LastOutT'] = self.outtemp
-            self.Internals['LastSetPoint'] = self.setpoint
-            if self.Internals["ALStatus"] != 2:
+            if self.Internals["ALStatus"] < 2:
+                self.Internals['LastPwr'] = power
+                self.Internals['LastInT'] = self.intemp
+                self.Internals['LastOutT'] = self.outtemp
+                self.Internals['LastSetPoint'] = self.setpoint
                 self.Internals['ALStatus'] = 1
                 self.saveUserVar()  # update user variables with latest learning
 
@@ -425,8 +407,8 @@ class BasePlugin:
                                                    (self.calculate_period * 60))))
             self.WriteLog("New calc for ConstC = {}".format(ConstC), "Verbose")
             self.Internals['ConstC'] = round((self.Internals['ConstC'] * self.Internals['nbCC'] + ConstC) /
-                                             (self.Internals['nbCC'] + 1), 1)
-            self.Internals['nbCC'] = min(self.Internals['nbCC'] + 1, 50)
+                                             (self.Internals['nbCC'] + 1), 3) # CJac Round aangepast van 2 naar 3
+            self.Internals['nbCC'] = min(self.Internals['nbCC'] + 1, 25) # CJac Maximale nbCC aangepast van 50 naar 25
             self.WriteLog("ConstC updated to {}".format(self.Internals['ConstC']), "Verbose")
         elif (self.outtemp is not None and self.Internals['LastOutT'] is not None) and \
                  self.Internals['LastSetPoint'] > self.Internals['LastOutT']:
@@ -438,8 +420,8 @@ class BasePlugin:
                                                    (self.calculate_period * 60))))
             self.WriteLog("New calc for ConstT = {}".format(ConstT), "Verbose")
             self.Internals['ConstT'] = round((self.Internals['ConstT'] * self.Internals['nbCT'] + ConstT) /
-                                             (self.Internals['nbCT'] + 1), 1)
-            self.Internals['nbCT'] = min(self.Internals['nbCT'] + 1, 50)
+                                             (self.Internals['nbCT'] + 1), 3) # CJac Round aangepast van 2 naar 3
+            self.Internals['nbCT'] = min(self.Internals['nbCT'] + 1, 25) # CJac Maximale nbCC aangepast van 50 naar 25
             self.WriteLog("ConstT updated to {}".format(self.Internals['ConstT']), "Verbose")
 
 
@@ -448,7 +430,7 @@ class BasePlugin:
         # Build list of heater switches, with their current status,
         # to be used to check if any of the heaters is already in desired state
         switches = {}
-        devicesAPI = DomoticzAPI("type=command&param=getdevices&filter=light&used=true&order=Name")
+        devicesAPI = DomoticzAPI("type=devices&filter=light&used=true&order=Name")
         if devicesAPI:
             for device in devicesAPI["result"]:  # parse the switch device
                 idx = int(device["idx"])
@@ -484,7 +466,7 @@ class BasePlugin:
         noerror = True
         listintemps = []
         listouttemps = []
-        devicesAPI = DomoticzAPI("type=command&param=getdevices&filter=temp&used=true&order=Name")
+        devicesAPI = DomoticzAPI("type=devices&filter=temp&used=true&order=Name")
         if devicesAPI:
             for device in devicesAPI["result"]:  # parse the devices for temperature sensors
                 idx = int(device["idx"])
@@ -508,7 +490,7 @@ class BasePlugin:
         # calculate the average inside temperature
         nbtemps = len(listintemps)
         if nbtemps > 0:
-            self.intemp = round(sum(listintemps) / nbtemps, 1)
+            self.intemp = round(sum(listintemps) / nbtemps, 2) # CJac Aanpassing hogere resolutie 
             # update the dummy device showing the current thermostat temp
             Devices[6].Update(nValue=0, sValue=str(self.intemp), TimedOut=False)
             if self.intemperror:  # there was previously an invalid inside temperature reading... reset to normal
@@ -556,10 +538,26 @@ class BasePlugin:
                         break
             if novar:
                 # create user variable since it does not exist
-                self.WriteLog("User Variable {} does not exist. Creating it.".format(varname), "Verbose")
+                self.WriteLog("User Variable {} does not exist. Creation requested".format(varname), "Verbose")
+
+                #check for Domoticz version:
+                # there is a breaking change on dzvents_version 2.4.9, API was changed from 'saveuservariable' to 'adduservariable'
+                # using 'saveuservariable' on latest versions returns a "status = 'ERR'" error
+
+                # get a status of the actual running Domoticz instance, set the parameter accordigly
+                parameter = "saveuservariable"
+                domoticzInfo = DomoticzAPI("type=command&param=getversion")
+                if domoticzInfo is None:
+                    Domoticz.Error("Unable to fetch Domoticz info... unable to determine version")
+                else:
+                    if domoticzInfo and LooseVersion(domoticzInfo["dzvents_version"]) >= LooseVersion("2.4.9"):
+                        self.WriteLog("Use 'adduservariable' instead of 'saveuservariable'", "Verbose")
+                        parameter = "adduservariable"
+                
                 # actually calling Domoticz API
-                DomoticzAPI("type=command&param=adduservariable&vname={}&vtype=2&vvalue={}".format(
-                    varname, str(self.InternalsDefaults)))
+                DomoticzAPI("type=command&param={}&vname={}&vtype=2&vvalue={}".format(
+                    parameter, varname, str(self.InternalsDefaults)))
+                
                 self.Internals = self.InternalsDefaults.copy()  # we re-initialize the internal variables
             else:
                 try:
@@ -582,7 +580,10 @@ class BasePlugin:
     def WriteLog(self, message, level="Normal"):
 
         if (self.loglevel == "Verbose" and level == "Verbose") or level == "Status":
-            Domoticz.Status(message)
+            if self.statussupported:
+                Domoticz.Status(message)
+            else:
+                Domoticz.Log(message)
         elif level == "Normal":
             Domoticz.Log(message)
 
