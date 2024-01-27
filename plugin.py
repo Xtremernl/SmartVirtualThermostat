@@ -348,10 +348,10 @@ class BasePlugin:
             else:
                 self.learn = True
             if self.outtemp is None:
-                power = round((self.setpoint - self.intemp) * self.Internals["ConstC"], 3) # CJac Round aangepast van 2 naar 3
+                power = round((self.setpoint - self.intemp) * self.Internals["ConstC"], 3) # (Xtremernl) Round aangepast van 2 naar 3
             else:
                 power = round((self.setpoint - self.intemp) * self.Internals["ConstC"] +
-                              (self.setpoint - self.outtemp) * self.Internals["ConstT"], 3) # CJac Round aangepast van 2 naar 3
+                              (self.setpoint - self.outtemp) * self.Internals["ConstT"], 3) # (Xtremernl) Round aangepast van 2 naar 3
 
         if power < 0:
             power = 0  # lower limit
@@ -371,6 +371,10 @@ class BasePlugin:
         if power == 0:
             self.switchHeat(False)
             Domoticz.Debug("No heating requested !")
+	    ## Add extra calculation (Xtremernl)
+	    now = datetime.now()
+            self.nextcalc = now + timedelta(minutes= 0.5 * self.calculate_period)
+            self.WriteLog("Next calculation time will be half the calculation period of " + str(self.calculate_period) + " minutes: " + str(self.nextcalc), "Verbose")
         else:
             self.endheat = datetime.now() + timedelta(minutes=heatduration)
             Domoticz.Debug("End Heat time = " + str(self.endheat))
@@ -407,8 +411,8 @@ class BasePlugin:
                                                    (self.calculate_period * 60))))
             self.WriteLog("New calc for ConstC = {}".format(ConstC), "Verbose")
             self.Internals['ConstC'] = round((self.Internals['ConstC'] * self.Internals['nbCC'] + ConstC) /
-                                             (self.Internals['nbCC'] + 1), 3) # CJac Round aangepast van 2 naar 3
-            self.Internals['nbCC'] = min(self.Internals['nbCC'] + 1, 25) # CJac Maximale nbCC aangepast van 50 naar 25
+                                             (self.Internals['nbCC'] + 1), 3) #  (Xtremernl) Round aangepast van 2 naar 3
+            self.Internals['nbCC'] = min(self.Internals['nbCC'] + 1, 25) #  (Xtremernl) Maximale nbCC aangepast van 50 naar 25
             self.WriteLog("ConstC updated to {}".format(self.Internals['ConstC']), "Verbose")
         elif (self.outtemp is not None and self.Internals['LastOutT'] is not None) and \
                  self.Internals['LastSetPoint'] > self.Internals['LastOutT']:
@@ -420,8 +424,8 @@ class BasePlugin:
                                                    (self.calculate_period * 60))))
             self.WriteLog("New calc for ConstT = {}".format(ConstT), "Verbose")
             self.Internals['ConstT'] = round((self.Internals['ConstT'] * self.Internals['nbCT'] + ConstT) /
-                                             (self.Internals['nbCT'] + 1), 3) # CJac Round aangepast van 2 naar 3
-            self.Internals['nbCT'] = min(self.Internals['nbCT'] + 1, 25) # CJac Maximale nbCC aangepast van 50 naar 25
+                                             (self.Internals['nbCT'] + 1), 3) #  (Xtremernl) Round aangepast van 2 naar 3
+            self.Internals['nbCT'] = min(self.Internals['nbCT'] + 1, 25) #  (Xtremernl) Maximale nbCC aangepast van 50 naar 25
             self.WriteLog("ConstT updated to {}".format(self.Internals['ConstT']), "Verbose")
 
 
@@ -490,7 +494,7 @@ class BasePlugin:
         # calculate the average inside temperature
         nbtemps = len(listintemps)
         if nbtemps > 0:
-            self.intemp = round(sum(listintemps) / nbtemps, 2) # CJac Aanpassing hogere resolutie 
+            self.intemp = round(sum(listintemps) / nbtemps, 2) # (Xtremernl) Aanpassing hogere resolutie 
             # update the dummy device showing the current thermostat temp
             Devices[6].Update(nValue=0, sValue=str(self.intemp), TimedOut=False)
             if self.intemperror:  # there was previously an invalid inside temperature reading... reset to normal
