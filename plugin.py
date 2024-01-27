@@ -359,7 +359,7 @@ class BasePlugin:
             power = 100  # upper limit
 
         # apply minimum power as required
-        if power <= self.minheatpower and (Parameters["Mode4"] == "Forced" or not overshoot):
+        if power > 0 and power <= self.minheatpower and (Parameters["Mode4"] == "Forced" or not overshoot):
             self.WriteLog(
                 "Calculated power is {}, applying minimum power of {}".format(power, self.minheatpower), "Verbose")
             power = self.minheatpower
